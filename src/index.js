@@ -3,7 +3,6 @@ import "dotenv/config";
 import cors from "cors";
 import job from "./lib/cron.js";
 import rateLimit from "express-rate-limit";
-import classifyRoutes from "./routes/classify.js";
 import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes.js";
 import reportRoutes from "./routes/reportRoutes.js";
@@ -64,7 +63,6 @@ app.get('/health', (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/report", reportLimiter, reportRoutes); // Rate limiter applied
 app.use("/api/users", userRoutes);
-app.use("/api/classify", classifyRoutes);
 app.use("/api/supervisor", supervisorRoutes);
 app.use("/api/workers", workerRoutes);
 app.use("/api/attendance", attendanceRoutes);
