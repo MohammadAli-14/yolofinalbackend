@@ -26,7 +26,7 @@ export default async function classifyImage(imageBase64) {
     });
 
     const payload = {
-      "model": "https://hub.ultralytics.com/models/8GivnHuJHLryISPmPIbB",
+      "model": "https://hub.ultralytics.com/models/ZVb5acmIVTVJsvn2CfpO",
       imgsz: 640,
       conf: 0.25,
       iou: 0.45
@@ -89,7 +89,7 @@ export default async function classifyImage(imageBase64) {
       verification,
       isHighConfidence: maxConfidence >= HIGH_CONFIDENCE_THRESHOLD,
       isVerifiedWaste: isWaste && maxConfidence >= HIGH_CONFIDENCE_THRESHOLD,
-      modelVersion: "YOLOv11"
+      modelVersion: "YOLOv8"
     };
 
     imageCache.set(hash, result);
