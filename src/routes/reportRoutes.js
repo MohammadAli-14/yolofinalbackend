@@ -8,9 +8,6 @@ import classifyImage from '../services/classificationService.js';
 
 const router = express.Router();
 
-// Constants for confidence thresholds
-const MIN_CONFIDENCE_WASTE = 0.65;     // Minimum confidence for waste classification
-const MIN_CONFIDENCE_NON_WASTE = 0.75;  // Minimum confidence for non-waste classification
 
 // Add request logging middleware
 router.use((req, res, next) => {
@@ -32,11 +29,9 @@ router.post('/', isAuthenticated, async (req, res) => {
       forceSubmit
     } = req.body;
 
-    // Server-side validation
     const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
-    
-    // Size validation using base64 string
-    if (Buffer.byteLength(base64Data, 'base64') > 5 * 1024 * 1024) {
+    const buffer = Buffer.from(base64Data, 'base64');
+    if (buffer.length > 5 * 1024 * 1024) {
       return res.status(413).json({ 
         message: 'Image too large (max 5MB)',
         code: 'IMAGE_TOO_LARGE'
@@ -48,32 +43,10 @@ router.post('/', isAuthenticated, async (req, res) => {
     if (!image) missingFields.push('image');
     if (!details) missingFields.push('details');
     if (!address) missingFields.push('address');
+    
+    // Check if coordinates are provided
     if (latitude === undefined || longitude === undefined) {
       missingFields.push('location');
-    } else {
-      // Validate coordinate format and range
-      const lat = parseFloat(latitude);
-      const lon = parseFloat(longitude);
-      
-      if (isNaN(lat) || isNaN(lon)) {
-        return res.status(400).json({
-          message: 'Invalid coordinates',
-          code: 'INVALID_COORDINATES'
-        });
-      }
-      
-      // Validate coordinate ranges
-      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-        return res.status(400).json({
-          message: 'Coordinates out of valid range',
-          code: 'INVALID_COORDINATES_RANGE',
-          details: {
-            validLatitudeRange: '[-90, 90]',
-            validLongitudeRange: '[-180, 180]',
-            received: { latitude: lat, longitude: lon }
-          }
-        });
-      }
     }
 
     if (missingFields.length > 0) {
@@ -84,7 +57,30 @@ router.post('/', isAuthenticated, async (req, res) => {
       });
     }
 
-    // Base64 validation
+    // Validate coordinate format and range
+    const lat = parseFloat(latitude);
+    const lon = parseFloat(longitude);
+    
+    if (isNaN(lat) || isNaN(lon)) {
+      return res.status(400).json({
+        message: 'Invalid coordinates',
+        code: 'INVALID_COORDINATES'
+      });
+    }
+    
+    // Validate coordinate ranges
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      return res.status(400).json({
+        message: 'Coordinates out of valid range',
+        code: 'INVALID_COORDINATES_RANGE',
+        details: {
+          validLatitudeRange: '[-90, 90]',
+          validLongitudeRange: '[-180, 180]',
+          received: { latitude: lat, longitude: lon }
+        }
+      });
+    }
+
     if (!/^(data:image\/\w+;base64,)?[A-Za-z0-9+/=]+$/.test(image)) {
       return res.status(400).json({
         message: 'Invalid image format',
@@ -93,16 +89,11 @@ router.post('/', isAuthenticated, async (req, res) => {
     }
 
     let classification;
-    // Only run AI check if user hasn't forced the submit
     if (!forceSubmit) {
       try {
         classification = await classifyImage(image);
-        
-        // 🔄 Updated classification check with dynamic confidence thresholds
-        const minConfidence = classification.isWaste ? MIN_CONFIDENCE_WASTE : MIN_CONFIDENCE_NON_WASTE;
-        
-        // Case 1: Non-waste with high confidence
-        if (!classification.isWaste && classification.confidence >= minConfidence) {
+
+        if (!classification.isWaste) {
           return res.status(400).json({
             message: 'Image does not show recognizable waste',
             classification,
@@ -110,8 +101,7 @@ router.post('/', isAuthenticated, async (req, res) => {
           });
         }
         
-        // Case 2: Low confidence for both waste/non-waste
-        if (classification.confidence < minConfidence) {
+        if (classification.confidence < 0.7) {
           return res.status(400).json({
             message: 'Low confidence in waste detection',
             classification,
@@ -119,7 +109,6 @@ router.post('/', isAuthenticated, async (req, res) => {
           });
         }
       } catch (error) {
-        console.error('Classification Error:', error);
         return res.status(503).json({
           message: 'Waste verification service unavailable',
           code: 'SERVICE_UNAVAILABLE',
@@ -128,12 +117,10 @@ router.post('/', isAuthenticated, async (req, res) => {
       }
     }
 
-    // Cloudinary upload with timeout - USING DATA URI
     let uploadResponse;
     try {
-      const dataUri = `data:image/jpeg;base64,${base64Data}`;
       const cloudinaryPromise = cloudinary.uploader.upload(
-        dataUri,
+        `data:image/jpeg;base64,${image}`,
         {
           resource_type: 'image',
           folder: 'reports',
@@ -142,13 +129,11 @@ router.post('/', isAuthenticated, async (req, res) => {
           transformation: [{ width: 800, crop: 'limit' }, { quality: 'auto:good' }]
         }
       );
-      
       const uploadTimeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('CLOUDINARY_TIMEOUT')), 15000)
       );
       uploadResponse = await Promise.race([cloudinaryPromise, uploadTimeout]);
     } catch (uploadError) {
-      console.error('Cloudinary Upload Error:', uploadError);
       if (uploadError.message === 'CLOUDINARY_TIMEOUT') {
         return res.status(504).json({
           message: 'Image upload timed out',
@@ -162,7 +147,6 @@ router.post('/', isAuthenticated, async (req, res) => {
       });
     }
 
-    // Create report in DB
     const finalReportType = reportType || 'standard';
     const newReport = new Report({
       title: title.trim(),
@@ -173,14 +157,18 @@ router.post('/', isAuthenticated, async (req, res) => {
       reportType: finalReportType,
       location: {
         type: 'Point',
-        coordinates: [parseFloat(longitude), parseFloat(latitude)]
+        coordinates: [lon, lat]  // Use validated coordinates
       },
       photoTimestamp: photoTimestamp ? new Date(photoTimestamp) : new Date(),
-      user: req.user._id
+      user: req.user._id,
+      aiVerification: classification ? {
+        isWaste: classification.isWaste,
+        confidence: classification.confidence,
+        verification: classification.verification
+      } : null
     });
     const savedReport = await newReport.save();
 
-    // Update user points
     const pointsMap = { standard: 10, hazardous: 20, large: 15 };
     const pointsToAdd = pointsMap[finalReportType] || 10;
     try {
@@ -188,16 +176,16 @@ router.post('/', isAuthenticated, async (req, res) => {
         $inc: { reportCount: 1, points: pointsToAdd }
       });
     } catch (updateError) {
-      console.error('User update error:', updateError);
+      // Silent fail for user points update
     }
 
     res.status(201).json({
       message: 'Report created successfully',
       report: savedReport,
-      pointsEarned: pointsToAdd
+      pointsEarned: pointsToAdd,
+      classification
     });
   } catch (error) {
-    console.error('Report Creation Error:', error);
     if (error.name === 'ValidationError') {
       return res.status(400).json({
         message: 'Validation Error',
