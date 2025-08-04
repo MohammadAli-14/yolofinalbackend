@@ -1,4 +1,3 @@
-// routes/reportRoutes.js
 import express from 'express';
 import Report from "../models/Report.js";
 import User from "../models/User.js";
@@ -7,13 +6,6 @@ import { isAuthenticated } from "../middleware/auth.js";
 import classifyImage from '../services/classificationService.js';
 
 const router = express.Router();
-
-
-// Add request logging middleware
-router.use((req, res, next) => {
-  console.log(`Incoming ${req.method} to ${req.path}`);
-  next();
-});
 
 router.post('/', isAuthenticated, async (req, res) => {
   try {
@@ -202,6 +194,7 @@ router.post('/', isAuthenticated, async (req, res) => {
 });
 
 // Test classification route
+// POST endpoint for test classification
 router.post('/test-classify', isAuthenticated, async (req, res) => {
   try {
     const { image } = req.body;
@@ -227,7 +220,6 @@ router.post('/test-classify', isAuthenticated, async (req, res) => {
     });
   }
 });
-
 
 // Pagination => infinite loading
 router.get("/", isAuthenticated, async (req, res) => {
@@ -267,8 +259,6 @@ router.get("/user", isAuthenticated, async (req, res) => {
   }
 });
 
-
-
 router.delete("/:id", isAuthenticated, async (req, res) => {
   try {
     const report = await Report.findById(req.params.id);
@@ -276,61 +266,41 @@ router.delete("/:id", isAuthenticated, async (req, res) => {
       return res.status(404).json({ message: "Report not found" });
     }
 
-    // Find the user who created the report
-    const user = await User.findById(report.user);
-    
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+    if (report.user.toString() !== req.user._id.toString()) {
+      return res.status(401).json({ message: "Unauthorized" });
     }
 
-    // Calculate points to deduct
-    const pointsMap = { standard: 10, hazardous: 20, large: 15 };
-    const pointsToDeduct = pointsMap[report.reportType] || 10;
-
-    // Update user counts and points
-    user.reportCount = Math.max(0, user.reportCount - 1);
-    user.points = Math.max(0, user.points - pointsToDeduct);
-    
-    await user.save();
-
-    // Delete the report and cloudinary image
     if (report.publicId) {
-      await cloudinary.uploader.destroy(report.publicId);
+      try {
+        await cloudinary.uploader.destroy(report.publicId);
+      } catch (deleteError) {
+        console.error("Cloudinary deletion error:", deleteError);
+      }
     }
+
+    const pointsMap = {
+      standard: 10,
+      hazardous: 20,
+      large: 15
+    };
     
+    const pointsToDeduct = report.reportType 
+      ? pointsMap[report.reportType] || 10 
+      : 10;
+
+    await User.findByIdAndUpdate(req.user._id, {
+      $inc: { 
+        reportCount: -1, 
+        points: -pointsToDeduct 
+      }
+    });
+
     await report.deleteOne();
     res.json({ message: "Report deleted successfully" });
     
   } catch (error) {
     console.error("Delete Report Error:", error);
     res.status(500).json({ message: "Internal Server Error" });
-  }
-});
-
-
-router.get("/:id", isAuthenticated, async (req, res) => {
-  try {
-    const report = await Report.findById(req.params.id)
-      .populate('user', 'username profileImage')
-      .populate('assignedTo', 'username email profileImage')
-      .populate('assignedBy', 'username profileImage')
-      .populate('resolvedBy', 'username email profileImage')
-      .populate('permanentlyResolvedBy', 'username email profileImage')
-      .populate('rejectedBy', 'username email profileImage')
-      .populate('outOfScopeBy', 'username email profileImage');
-
-    if (!report) {
-      return res.status(404).json({ message: "Report not found" });
-    }
-
-    // Verify report ownership
-    if (report.user._id.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: "Unauthorized access" });
-    }
-
-    res.json(report);
-  } catch (error) {
-    res.status(500).json({ message: "Server error" });
   }
 });
 
