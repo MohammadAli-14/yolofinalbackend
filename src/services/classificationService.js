@@ -27,7 +27,7 @@ export default async function classifyImage(imageBase64) {
 
     const payload = {
       "model": "https://hub.ultralytics.com/models/8GivnHuJHLryISPmPIbB",
-      imgsz: 224,
+      imgsz: 640,
       conf: 0.25,
       iou: 0.45
     };
