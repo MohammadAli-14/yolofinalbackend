@@ -214,15 +214,32 @@ router.post('/', isAuthenticated, async (req, res) => {
 });
 
 // Test classification route
-router.get('/test-classify', async (req, res) => {
+router.post('/test-classify', isAuthenticated, async (req, res) => {
   try {
-    const sampleBase64 = "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-    const result = await classifyImage(sampleBase64);
+    const { image } = req.body;
+    
+    if (!image) {
+      return res.status(400).json({ 
+        error: 'No image provided',
+        code: 'MISSING_IMAGE'
+      });
+    }
+
+    console.log('Testing classification with image');
+    const result = await classifyImage(image);
+    console.log('Classification result:', result);
+    
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Test classification error:', error);
+    res.status(500).json({ 
+      error: 'Classification failed',
+      details: error.message,
+      stack: error.stack // Only for development!
+    });
   }
 });
+
 
 // Pagination => infinite loading
 router.get("/", isAuthenticated, async (req, res) => {
