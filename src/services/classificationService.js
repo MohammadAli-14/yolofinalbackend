@@ -89,7 +89,7 @@ export default async function classifyImage(imageBase64) {
       verification,
       isHighConfidence: maxConfidence >= HIGH_CONFIDENCE_THRESHOLD,
       isVerifiedWaste: isWaste && maxConfidence >= HIGH_CONFIDENCE_THRESHOLD,
-      modelVersion: "YOLOv8"
+      modelVersion: "YOLOv11"
     };
 
     imageCache.set(hash, result);
