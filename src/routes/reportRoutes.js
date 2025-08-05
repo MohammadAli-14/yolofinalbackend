@@ -303,5 +303,30 @@ router.delete("/:id", isAuthenticated, async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 });
+router.get("/:id", isAuthenticated, async (req, res) => {
+  try {
+    const report = await Report.findById(req.params.id)
+      .populate('user', 'username profileImage')
+      .populate('assignedTo', 'username email profileImage')
+      .populate('assignedBy', 'username profileImage')
+      .populate('resolvedBy', 'username email profileImage')
+      .populate('permanentlyResolvedBy', 'username email profileImage')
+      .populate('rejectedBy', 'username email profileImage')
+      .populate('outOfScopeBy', 'username email profileImage');
+
+    if (!report) {
+      return res.status(404).json({ message: "Report not found" });
+    }
+
+    // Verify report ownership
+    if (report.user._id.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Unauthorized access" });
+    }
+
+    res.json(report);
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 export default router;
