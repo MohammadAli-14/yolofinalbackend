@@ -699,47 +699,109 @@ export const getSupervisorPerformanceAnalytics = catchAsyncError(async (req, res
   const supervisors = await User.find({ role: 'supervisor' });
   const performanceData = await Promise.all(
     supervisors.map(async (supervisor) => {
-      // 1) Aggregate counts for statuses that have resolvedBy
-      const reports = await Report.aggregate([
-        { $match: { resolvedBy: supervisor._id } },
-        {
-          $group: {
-            _id: '$status',
-            count: { $sum: 1 }
-          }
-        }
+      // Count reports using the appropriate fields for each status
+      const [inProgress, resolved, permanentResolved, rejected, outOfScope] = await Promise.all([
+        Report.countDocuments({ 
+          assignedTo: supervisor._id, 
+          status: 'in-progress' 
+        }),
+        Report.countDocuments({ 
+          resolvedBy: supervisor._id, 
+          status: 'resolved' 
+        }),
+        Report.countDocuments({ 
+          permanentlyResolvedBy: supervisor._id, 
+          status: 'permanent-resolved' 
+        }),
+        Report.countDocuments({ 
+          rejectedBy: supervisor._id, 
+          status: 'rejected' 
+        }),
+        // FIX: Use outOfScopeBy instead of resolvedBy
+        Report.countDocuments({ 
+          outOfScopeBy: supervisor._id, 
+          status: 'out-of-scope' 
+        })
       ]);
-      const resolved  = reports.find(r => r._id === 'resolved')?.count  || 0;
-      const permanent = reports.find(r => r._id === 'permanent-resolved')?.count || 0;
-      const rejected  = reports.find(r => r._id === 'rejected')?.count  || 0;
-      const outOfScope= reports.find(r => r._id === 'out-of-scope')?.count  || 0;
-      // 2) Separately count in-progress *assignments*
-      const inProgress = await Report.countDocuments({
-        assignedTo: supervisor._id,
-        status: 'in-progress'
-      });
-      // 3) Compute success rate (only counts those that went through resolve/permanent vs rejected/out-of-scope)
-      const handledTotal = resolved + permanent + rejected + outOfScope;
+
+      // Calculate success rate
+      const handledTotal = resolved + permanentResolved + rejected + outOfScope;
       const successRate = handledTotal > 0
-        ? Math.round((resolved + permanent) / handledTotal * 100)
+        ? Math.round((resolved + permanentResolved) / handledTotal * 100)
         : 0;
+      
+      let performance;
+      if (successRate >= 90) performance = "Excellent";
+      else if (successRate >= 75) performance = "Good";
+      else if (successRate >= 50) performance = "Average";
+      else performance = "Needs Improvement";
+      
       return {
         supervisor: supervisor.username,
         profileImage: supervisor.profileImage,
         inProgress,
         resolved,
-        permanentResolved: permanent,
+        permanentResolved,
         rejected,
         outOfScope,
-        successRate
+        successRate,
+        performance
       };
     })
   );
+
   res.status(200).json({
     success: true,
     performanceData
   });
 });
+
+
+// export const getSupervisorPerformanceAnalytics = catchAsyncError(async (req, res, next) => {
+//   const supervisors = await User.find({ role: 'supervisor' });
+//   const performanceData = await Promise.all(
+//     supervisors.map(async (supervisor) => {
+//       // 1) Aggregate counts for statuses that have resolvedBy
+//       const reports = await Report.aggregate([
+//         { $match: { resolvedBy: supervisor._id } },
+//         {
+//           $group: {
+//             _id: '$status',
+//             count: { $sum: 1 }
+//           }
+//         }
+//       ]);
+//       const resolved  = reports.find(r => r._id === 'resolved')?.count  || 0;
+//       const permanent = reports.find(r => r._id === 'permanent-resolved')?.count || 0;
+//       const rejected  = reports.find(r => r._id === 'rejected')?.count  || 0;
+//       const outOfScope= reports.find(r => r._id === 'out-of-scope')?.count  || 0;
+//       // 2) Separately count in-progress *assignments*
+//       const inProgress = await Report.countDocuments({
+//         assignedTo: supervisor._id,
+//         status: 'in-progress'
+//       });
+//       // 3) Compute success rate (only counts those that went through resolve/permanent vs rejected/out-of-scope)
+//       const handledTotal = resolved + permanent + rejected + outOfScope;
+//       const successRate = handledTotal > 0
+//         ? Math.round((resolved + permanent) / handledTotal * 100)
+//         : 0;
+//       return {
+//         supervisor: supervisor.username,
+//         profileImage: supervisor.profileImage,
+//         inProgress,
+//         resolved,
+//         permanentResolved: permanent,
+//         rejected,
+//         outOfScope,
+//         successRate
+//       };
+//     })
+//   );
+//   res.status(200).json({
+//     success: true,
+//     performanceData
+//   });
+// });
 // Worker Attendance Analytics
 export const getWorkerAttendanceAnalytics = catchAsyncError(async (req, res, next) => {
   const thirtyDaysAgo = moment().tz('Asia/Karachi').subtract(30, 'days').toDate();
