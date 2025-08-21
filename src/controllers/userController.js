@@ -9,6 +9,60 @@ import {
   generateWelcomeTemplate
 } from '../utils/emailTemplates.js';
 
+// export const register = catchAsyncError(async (req, res, next) => {
+//   try {
+//     const { username, email, password } = req.body;
+    
+//     // Validate required fields
+//     if (!username || !email || !password) {
+//       return next(new ErrorHandler("All fields are required.", 400));
+//     }
+
+//     // Check for existing verified user
+//     const existingUser = await User.findOne({ 
+//       email,
+//       accountVerified: true
+//     });
+
+//     if (existingUser) {
+//       return next(new ErrorHandler("Email is already registered.", 400));
+//     }
+    
+//     // Enhanced: Prevent too many registration attempts within 24 hours
+//     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+//     const registrationAttempts = await User.countDocuments({
+//       email,
+//       accountVerified: false,
+//       createdAt: { $gt: twentyFourHoursAgo }
+//     });
+
+//     if (registrationAttempts >= 3) {
+//       return next(
+//         new ErrorHandler(
+//           "You have exceeded the maximum registration attempts. Please try again tomorrow.",
+//           400
+//         )
+//       );
+//     }
+
+//     // Create user profile
+//     const profileImage = `https://api.dicebear.com/7.x/avataaars/png?seed=${username}`;
+//     const userData = { username, email, password, profileImage };
+
+//     const user = await User.create(userData);
+//     const verificationCode = user.generateVerificationCode();
+//     await user.save();
+    
+//     // Send verification email
+//     sendVerificationEmail(verificationCode, username, email, res);
+    
+//   } catch (error) {
+//     console.error("Registration Error:", error);
+//     next(error);
+//   }
+// });
+
+
 export const register = catchAsyncError(async (req, res, next) => {
   try {
     const { username, email, password } = req.body;
@@ -16,6 +70,49 @@ export const register = catchAsyncError(async (req, res, next) => {
     // Validate required fields
     if (!username || !email || !password) {
       return next(new ErrorHandler("All fields are required.", 400));
+    }
+
+    // Validate username length
+    if (username.length < 3 || username.length > 32) {
+      return next(new ErrorHandler("Username must be between 3 and 32 characters.", 400));
+    }
+
+    // ENHANCED: Validate email format with specific rules
+    // 1. Only one @ symbol
+    // 2. Before @: only alphanumeric characters, at least one alphabet
+    // 3. After @: specific allowed domains
+    const emailRegex = /^[A-Za-z0-9]+@[A-Za-z0-9]+\.[A-Za-z0-9]+$/;
+    
+    // Check if email matches basic format
+    if (!emailRegex.test(email)) {
+      return next(new ErrorHandler("Please enter a valid email address.", 400));
+    }
+    
+    // Check for exactly one @ symbol
+    const atSymbolCount = (email.match(/@/g) || []).length;
+    if (atSymbolCount !== 1) {
+      return next(new ErrorHandler("Email can only contain one @ symbol.", 400));
+    }
+    
+    // Split email into local part and domain
+    const [localPart, domain] = email.split('@');
+    
+    // Check local part contains at least one alphabet character
+    const hasAlphabet = /[A-Za-z]/.test(localPart);
+    if (!hasAlphabet) {
+      return next(new ErrorHandler("Email must contain at least one letter before the @ symbol.", 400));
+    }
+    
+    // Check local part contains only alphanumeric characters
+    const isLocalPartValid = /^[A-Za-z0-9]+$/.test(localPart);
+    if (!isLocalPartValid) {
+      return next(new ErrorHandler("Email can only contain letters and numbers before the @ symbol.", 400));
+    }
+
+    // Restrict to specific domains (including original iiu.edu.pk)
+    const allowedDomains = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'iiu.edu.pk'];
+    if (!allowedDomains.includes(domain)) {
+      return next(new ErrorHandler("We only accept emails from Gmail, Yahoo, Outlook, Hotmail, and IIU.edu.pk.", 400));
     }
 
     // Check for existing verified user
@@ -28,7 +125,7 @@ export const register = catchAsyncError(async (req, res, next) => {
       return next(new ErrorHandler("Email is already registered.", 400));
     }
     
-    // Enhanced: Prevent too many registration attempts within 24 hours
+    // Prevent too many registration attempts within 24 hours
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const registrationAttempts = await User.countDocuments({
       email,
@@ -229,20 +326,25 @@ export const login = catchAsyncError(async (req, res, next) => {
     return next(new ErrorHandler("Email, password, and client type are required.", 400));
   }
 
-  // Find user with verified account
+  // Find user by email (regardless of verification status)
   const user = await User.findOne({
-    email,
-    accountVerified: true
-  }).select("+password +welcomeEmailSent");
+    email
+  }).select("+password +welcomeEmailSent +accountVerified");
 
+  // Check if user exists
   if (!user) {
-    return next(new ErrorHandler("Invalid email or password.", 400));
+    return next(new ErrorHandler("No account found with this email address.", 400));
+  }
+
+  // Check if account is verified
+  if (!user.accountVerified) {
+    return next(new ErrorHandler("Please verify your account before logging in.", 400));
   }
 
   // Verify password
   const isPasswordMatched = await user.comparePassword(password);
   if (!isPasswordMatched) {
-    return next(new ErrorHandler("Invalid email or password.", 400));
+    return next(new ErrorHandler("Incorrect password. Please try again.", 400));
   }
 
   // Validate role based on client type
